@@ -26,23 +26,16 @@ void cmdThread(EasyTcpClient* client) {
 
 int main() {
 	EasyTcpClient client;
-	EasyTcpClient client2;
 
 	client.initSocket();
 	client.Connect((char*)"127.0.0.1", 4567);
 	std::thread t1(cmdThread, &client);
 	t1.detach();
 
-	client2.Connect((char*)"127.0.0.1", 4567);
-	std::thread t2(cmdThread, &client2);
-	t2.detach();
-
-	while (client.isRun() || client2.isRun()) {
+	while (client.isRun()) {
 		client.OnSelect();
-		client2.OnSelect();
 	}
 	client.close();
-	client2.close();
 	getchar();
 	return 0;
 }

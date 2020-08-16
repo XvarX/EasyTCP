@@ -7,35 +7,41 @@ void cmdThread(EasyTcpClient* client) {
 		scanf("%s", cmdBuff);
 		if (0 == strcmp(cmdBuff, "exit")) {
 			printf("exit\n");
-			client->close();
+			g_bRun = false;
 			return;
-		}
-		else if (0 == strcmp(cmdBuff, "login")) {
-			Login login;
-			strcpy(login.userName, "yxj");
-			strcpy(login.userPassWord, "123456");
-			client->SendData(&login);
-		}
-		else if (0 == strcmp(cmdBuff, "logout")) {
-			Logout logout;
-			strcpy(logout.userName, "yxj");
-			client->SendData(&logout);
 		}
 	}
 }
 
 int main() {
-	EasyTcpClient client;
+	const int cCount = 200;
+	EasyTcpClient* client[cCount];
 
-	client.initSocket();
-	client.Connect((char*)"127.0.0.1", 4567);
-	std::thread t1(cmdThread, &client);
-	t1.detach();
-
-	while (client.isRun()) {
-		client.OnSelect();
+	for (int n = 0; n < cCount; n++) {
+		if (!g_bRun) {
+			return 0;
+		}
+		client[n] = new EasyTcpClient();
+		client[n]->initSocket();
+		client[n]->Connect((char*)"127.0.0.1", 4567);
 	}
-	client.close();
+	//std::thread t1(cmdThread, &client);
+	//t1.detach();
+
+
+	Login login;
+	strcpy(login.userName, "lyd");
+	strcpy(login.userPassWord, "lydmm");
+	while (g_bRun) {
+		for (int n = 0; n < cCount; n++) {
+			client[n]->OnSelect();
+			client[n]->SendData(&login);
+		}
+	}
+
+	for (int n = 0; n < cCount; n++) {
+		client[n]->close();
+	}
 	getchar();
 	return 0;
 }

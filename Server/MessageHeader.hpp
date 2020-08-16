@@ -8,6 +8,10 @@ enum CMD {
 	CMD_ERROR
 };
 struct DataHead {
+	DataHead() {
+		dataLength = sizeof(DataHead);
+		cmd = CMD_ERROR;
+	}
 	short dataLength;
 	short cmd;
 };
@@ -19,6 +23,7 @@ struct Login : public DataHead {
 	}
 	char userName[32];
 	char userPassWord[32];
+	char data[1024];
 };
 
 struct LoginResult : public DataHead {
@@ -28,6 +33,7 @@ struct LoginResult : public DataHead {
 		result = 0;
 	}
 	int result;
+	char data[1024];
 };
 
 struct Logout : public DataHead {

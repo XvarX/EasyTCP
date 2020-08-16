@@ -5,6 +5,7 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #ifdef  _WIN32
+#define FD_SETSIZE 1024
 #include <Windows.h>
 #include <WinSock2.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -20,10 +21,45 @@
 #include <vector>
 #include "MessageHeader.hpp"
 
+#ifndef RECV_BUFF_SIZE
+#define RECV_BUFF_SIZE 10240
+#endif
+
+class ClientSocket {
+public:
+	ClientSocket(SOCKET sockfd = INVALID_SOCKET) {
+		_sockfd = sockfd;
+		memset(_szMsgBuf, 0, sizeof(_szMsgBuf));
+		_lastPos = 0;
+	}
+	SOCKET sockfd() {
+		return _sockfd;
+	}
+	char* msgBuf() {
+		return _szMsgBuf;
+	}
+
+	int getLastPos() {
+		return _lastPos;
+	}
+	void setLastPos(int pos) {
+		_lastPos = pos;
+	}
+
+private:
+	//socket fd_set file desc set
+	SOCKET _sockfd;
+	//第二缓冲区 消息缓冲区
+	char _szMsgBuf[RECV_BUFF_SIZE * 10];
+	//消息缓冲区的数据尾部位置
+	int _lastPos;
+};
+
+//new 堆内存 非new 栈内存
 class EasyTcpServer {
 private:
 	SOCKET _sock;
-	std::vector<SOCKET> g_clients;
+	std::vector<ClientSocket*> _clients;
 
 public:
 	EasyTcpServer() {
@@ -100,40 +136,43 @@ public:
 	SOCKET Accept() {
 		sockaddr_in clientAddr = {};
 		int nAddrLen = sizeof(sockaddr_in);
-		SOCKET _cSock = INVALID_SOCKET;
+		SOCKET cSock = INVALID_SOCKET;
 #ifdef _WIN32
-		_cSock = accept(_sock, (sockaddr*)&clientAddr, &nAddrLen);
+		cSock = accept(_sock, (sockaddr*)&clientAddr, &nAddrLen);
 #else
-		_cSock = accept(_sock, (sockaddr*)&clientAddr, (socklen_t*)&nAddrLen);
+		cSock = accept(_sock, (sockaddr*)&clientAddr, (socklen_t*)&nAddrLen);
 #endif
-		if (INVALID_SOCKET == _cSock) {
+		if (INVALID_SOCKET == cSock) {
 			printf("socket=<%d>错误，接受到无效客户端SOCKET...\n", _sock);
 		}
 		else {
 			NewUserJoin userJoin;
-			userJoin.sock = int(_cSock);
+			userJoin.sock = int(cSock);
 			SendDataToAll(&userJoin);
-			g_clients.push_back(_cSock);
-			printf("socket=<%d>新客户端加入：socket = %d, IP = %s \n", _sock, (int)_cSock, inet_ntoa(clientAddr.sin_addr));
+			_clients.push_back(new ClientSocket(cSock));
+			printf("socket=<%d>新客户端加入<%d>：socket = %d, IP = %s \n", _sock, _clients.size(), (int)cSock, inet_ntoa(clientAddr.sin_addr));
 		}
-		return _cSock;
+		return cSock;
 	}
 
 	//关闭socket
 	void Close() {
 		if (_sock != INVALID_SOCKET) {
 #ifdef _WIN32
-			for (int n = (int)g_clients.size() - 1; n >= 0; n--) {
-				closesocket(g_clients[n]);
+			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+				closesocket(_clients[n]->sockfd());
+				delete _clients[n];
 			}
 			closesocket(_sock);
 			WSACleanup();
 #else
-			for (int n = (int)g_clients.size() - 1; n >= 0; n--) {
-				close(g_clients[n]);
+			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+				close(_clients[n]->sockfd());
+				delete _clients[n];
 			}
 			close(_sock);
 #endif
+			_clients.clear();
 		}
 	}
 	//处理网络消息
@@ -154,10 +193,10 @@ public:
 			FD_SET(_sock, &fdExp);
 
 			SOCKET maxSock = _sock;
-			for (int n = (int)g_clients.size() - 1; n >= 0; n--) {
-				FD_SET(g_clients[n], &fdRead);
-				if (maxSock < g_clients[n]) {
-					maxSock = g_clients[n];
+			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+				FD_SET(_clients[n]->sockfd(), &fdRead);
+				if (maxSock < _clients[n]->sockfd()) {
+					maxSock = _clients[n]->sockfd();
 				}
 			}
 			//nfds 是一个整数值，是指fd_set集合中所有描述符socket的范围，而不是数量
@@ -173,12 +212,13 @@ public:
 				FD_CLR(_sock, &fdRead);
 				Accept();
 			}
-			for (int n = (int)g_clients.size() - 1; n >= 0; n--) {
-				if (FD_ISSET(g_clients[n], &fdRead)) {
-					if (-1 == RecvData(g_clients[n])) {
-						auto iter = g_clients.begin() + n;
-						if (iter != g_clients.end()) {
-							g_clients.erase(iter);
+			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+				if (FD_ISSET(_clients[n]->sockfd(), &fdRead)) {
+					if (-1 == RecvData(_clients[n])) {
+						auto iter = _clients.begin() + n;
+						if (iter != _clients.end()) {
+							delete _clients[n];
+							_clients.erase(iter);
 						}
 					}
 				}
@@ -193,56 +233,69 @@ public:
 		return _sock != INVALID_SOCKET;
 	}
 	//接收数据
-	int RecvData(SOCKET _cSock) {
-		//缓冲区
-		char szRecv[4096] = {};
-		int nLen = (int)recv(_cSock, szRecv, sizeof(DataHead), 0);
-		DataHead* header = (DataHead*)szRecv;
+	char _szRecv[RECV_BUFF_SIZE] = {};
+	int RecvData(ClientSocket* pClient) {
+
+		int nLen = (int)recv(pClient->sockfd(), _szRecv, RECV_BUFF_SIZE, 0);
 		if (nLen <= 0) {
-			printf("客户端<socket=%d>已退出，任务结束。\n", _cSock);
+			printf("客户端<socket=%d>已退出，任务结束。\n", pClient->sockfd());
 			return -1;
 		}
-		recv(_cSock, szRecv + sizeof(DataHead), header->dataLength - sizeof(DataHead), 0);
-		OnNetMsg(_cSock, header);
+		memcpy(pClient->msgBuf() + pClient->getLastPos(), _szRecv, nLen);
+
+		pClient->setLastPos(pClient->getLastPos() + nLen);
+		while (pClient->getLastPos() >= sizeof(DataHead)) {
+			DataHead* header = (DataHead*)pClient->msgBuf();
+			if (pClient->getLastPos() >= header->dataLength) {
+				int nSize = pClient->getLastPos() - header->dataLength;
+				OnNetMsg(pClient->sockfd(), header);
+				memcpy(pClient->msgBuf(), pClient->msgBuf() + header->dataLength, nSize);
+				pClient->setLastPos(nSize);
+			}
+			else {
+				break;
+			}
+		}
 		return 0;
 	}
 	//响应网络消息
-	virtual void OnNetMsg(SOCKET _cSock, DataHead* header) {
+	virtual void OnNetMsg(SOCKET cSock, DataHead* header) {
 		switch (header->cmd) {
 		case CMD_LOGIN: {
 			Login* login = (Login*)header;
-			printf("收到客户端<socket=%d>请求：CMD_LOGIN，数据长度:%d，userName=%s PassWord=%s\n", _cSock, login->dataLength, login->userName, login->userPassWord);
+			//printf("收到客户端<socket=%d>请求：CMD_LOGIN，数据长度:%d，userName=%s PassWord=%s\n", cSock, login->dataLength, login->userName, login->userPassWord);
 			LoginResult ret;
-			send(_cSock, (char*)&ret, sizeof(LoginResult), 0);
+			SendData(cSock, &ret);
 		}
 					  break;
 		case CMD_LOGOUT: {
 			Logout* logout = (Logout*)header;
-			printf("收到客户端<socket=%d>请求：CMD_LOGOUT，数据长度:%d，userName=%s", _cSock, logout->dataLength, logout->userName);
+			//printf("收到客户端<socket=%d>请求：CMD_LOGOUT，数据长度:%d，userName=%s", cSock, logout->dataLength, logout->userName);
 			LogoutResult ret;
-			send(_cSock, (char*)&ret, sizeof(LogoutResult), 0);
+			SendData(cSock, &ret);
 		}
 					   break;
 		default:
 		{
-			DataHead header = { 0, CMD_ERROR };
-			send(_cSock, (char*)&header, sizeof(header), 0);
+			printf("<socket=%d>收到未定义消息，数据长度：%d\n", cSock, header->dataLength);
+			//DataHead ret;
+			//send(cSock, (char*)&header, sizeof(header), 0);
 		}
 		break;
 		}
 	}
 	//发送指定socket数据
-	int SendData(SOCKET _cSock, DataHead* header) {
+	int SendData(SOCKET cSock, DataHead* header) {
 		if (isRun() && header) {
-			return send(_cSock, (const char*)header, header->dataLength, 0);
+			return send(cSock, (const char*)header, header->dataLength, 0);
 		}
 		return SOCKET_ERROR;
 	}
 
 	void SendDataToAll(DataHead* header) {
 		if (isRun() && header) {
-			for (int n = (int)g_clients.size() - 1; n >= 0; n--) {
-				SendData(g_clients[n], header);
+			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+				SendData(_clients[n]->sockfd(), header);
 			}
 		}
 	}

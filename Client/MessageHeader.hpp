@@ -18,6 +18,7 @@ struct Login : public DataHead {
 	}
 	char userName[32];
 	char userPassWord[32];
+	char data[932];
 };
 
 struct LoginResult : public DataHead {
@@ -27,6 +28,7 @@ struct LoginResult : public DataHead {
 		result = 0;
 	}
 	int result;
+	char data[992];
 };
 
 struct Logout : public DataHead {

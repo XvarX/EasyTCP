@@ -106,7 +106,7 @@ bool OnSelect() {
 
 		if (FD_ISSET(_sock, &rdRead)) {
 			FD_CLR(_sock, &rdRead);
-			if (-1 == RecvData()) {
+			if (-1 == RecvData(_sock)) {
 				printf("<socket=%d>server exit", _sock);
 				return false;
 			}
@@ -121,16 +121,42 @@ bool isRun() {
 }
 
 //接收数据 处理粘包 拆分包
-int RecvData() {
-	char szRecv[1024] = {};
-	int nLen = recv(_sock, szRecv, sizeof(DataHead), 0);
-	DataHead* header = (DataHead*)szRecv;
+
+#define RECV_BUFF_SIZE 10240
+//接受缓冲区
+char _szRecv[RECV_BUFF_SIZE] = {};
+
+char _szMsgBuf[RECV_BUFF_SIZE*10] = {};
+
+int _lastPos = 0;
+
+int RecvData(SOCKET cSock) {
+	int nLen = recv(cSock, _szRecv, RECV_BUFF_SIZE, 0);
 	if (nLen <= 0) {
 		printf("disconnect server exit\n");
 		return -1;
 	}
-	recv(_sock, szRecv + sizeof(DataHead), header->dataLength - sizeof(DataHead), 0);
-	OnNetMsg(header);
+	//将收取到的数据拷贝到消息缓冲区
+	memcpy(_szMsgBuf+_lastPos, _szRecv, nLen);
+	//消息缓冲区的数据尾部位置后移
+	_lastPos += nLen;
+
+	while (_lastPos >= sizeof(DataHead)) {
+		DataHead* header = (DataHead*)_szMsgBuf;
+		//判断消息缓冲区的数据长度大于消息长度
+		if (_lastPos >= header->dataLength) {
+			//剩余未处理消息缓冲区数据的长度
+			int nSize = _lastPos - header->dataLength;
+			//OnNetMsg(header);
+			//将消息缓冲区剩余未处理数据前移
+			memcpy(_szMsgBuf, _szMsgBuf + header->dataLength, _lastPos - header->dataLength);
+			_lastPos = nSize;
+		}
+		else {
+			//剩余缓冲区剩余不够一条完整消息
+			break;
+		}
+	}
 	return 0;
 }
 
@@ -140,24 +166,28 @@ void OnNetMsg(DataHead* header) {
 	case CMD_LOGIN_RESULT:
 	{
 		LoginResult* loginresult = (LoginResult*)header;
-		printf("login result %d\n", loginresult->result);
+		//printf("login result %d %d\n", loginresult->result, loginresult->dataLength);
 	}
 	break;
 	case CMD_LOGOUT_RESULT:
 	{
 		LogoutResult* logoutresult = (LogoutResult*)header;
-		printf("logout result %d\n", logoutresult->result);
+		//printf("logout result %d\n", logoutresult->result);
 	}
 	break;
 	case CMD_NEW_USER_JOIN:
 	{
 		NewUserJoin* userjoin = (NewUserJoin*)header;
-		printf("user join %d\n", userjoin->sock);
+		//printf("user join %d\n", userjoin->sock);
 	}
+	break;
+	case CMD_ERROR: {
+		NewUserJoin* userjoin = (NewUserJoin*)header;
+		printf("error");
+	}
+	break;
 	default:
-		DataHead header = {};
-		header.cmd = CMD_ERROR;
-		header.dataLength = 0;
+		printf("no defines");
 	}
 }
 

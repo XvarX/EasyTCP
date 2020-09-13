@@ -14,7 +14,7 @@ void cmdThread(EasyTcpClient* client) {
 }
 
 int main() {
-	const int cCount = 200;
+	const int cCount = 2000;
 	EasyTcpClient* client[cCount];
 
 	for (int n = 0; n < cCount; n++) {
@@ -24,6 +24,7 @@ int main() {
 		client[n] = new EasyTcpClient();
 		client[n]->initSocket();
 		client[n]->Connect((char*)"127.0.0.1", 4567);
+		printf("Connect=%d\n", n);
 	}
 	//std::thread t1(cmdThread, &client);
 	//t1.detach();

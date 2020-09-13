@@ -44,7 +44,7 @@ public:
 			printf("create error\n");
 		}
 		else {
-			printf("create success\n");
+			//printf("create success\n");
 		}
 	}
 	//连接服务器
@@ -68,7 +68,7 @@ public:
 			printf("connect error\n");
 		}
 		else {
-			printf("connect success\n");
+			//printf("connect success\n");
 		}
 		return ret;
 	}

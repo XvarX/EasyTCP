@@ -5,7 +5,7 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #ifdef  _WIN32
-#define FD_SETSIZE 1024
+#define FD_SETSIZE 10024
 #include <Windows.h>
 #include <WinSock2.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <vector>
 #include "MessageHeader.hpp"
+#include "CELLTimestamp.hpp"
 
 #ifndef RECV_BUFF_SIZE
 #define RECV_BUFF_SIZE 10240
@@ -60,10 +61,13 @@ class EasyTcpServer {
 private:
 	SOCKET _sock;
 	std::vector<ClientSocket*> _clients;
+	CELLTimestamp _tTime;
+	int _recvCount;
 
 public:
 	EasyTcpServer() {
 		_sock = INVALID_SOCKET;
+		_recvCount = 0;
 	}
 	virtual ~EasyTcpServer() {
 		Close();
@@ -148,9 +152,9 @@ public:
 		else {
 			NewUserJoin userJoin;
 			userJoin.sock = int(cSock);
-			SendDataToAll(&userJoin);
+			//SendDataToAll(&userJoin);
 			_clients.push_back(new ClientSocket(cSock));
-			printf("socket=<%d>新客户端加入<%d>：socket = %d, IP = %s \n", _sock, _clients.size(), (int)cSock, inet_ntoa(clientAddr.sin_addr));
+			//printf("socket=<%d>新客户端加入<%d>：socket = %d, IP = %s \n", _sock, _clients.size(), (int)cSock, inet_ntoa(clientAddr.sin_addr));
 		}
 		return cSock;
 	}
@@ -211,6 +215,7 @@ public:
 			if (FD_ISSET(_sock, &fdRead)) {
 				FD_CLR(_sock, &fdRead);
 				Accept();
+				return true;
 			}
 			for (int n = (int)_clients.size() - 1; n >= 0; n--) {
 				if (FD_ISSET(_clients[n]->sockfd(), &fdRead)) {
@@ -260,6 +265,13 @@ public:
 	}
 	//响应网络消息
 	virtual void OnNetMsg(SOCKET cSock, DataHead* header) {
+		_recvCount++;
+		auto t1 = _tTime.getElapsedTimeInSec();
+		if (t1 >= 1.0) {
+			printf("time<%lf>, socket<%d>, client<%d>, recvCount<%d>\n", t1, _sock, _clients.size(), _recvCount);
+			_tTime.update();
+			_recvCount = 0;
+		}
 		switch (header->cmd) {
 		case CMD_LOGIN: {
 			Login* login = (Login*)header;
